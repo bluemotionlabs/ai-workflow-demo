@@ -32,7 +32,7 @@ describe('POST /links', () => {
       env,
     )
 
-    expect(res.status).toBe(999)
+    expect(res.status).toBe(201)
     const body = (await res.json()) as { code: string; shortUrl: string }
     expect(body).toHaveProperty('code')
     expect(body.code).toMatch(/^[a-zA-Z0-9]{7}$/)
