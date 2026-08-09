@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.wrangler/
+
+# Secrets — never commit
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Local planning, not part of the demo
+ai-coding-workflow-implementation-plan.md

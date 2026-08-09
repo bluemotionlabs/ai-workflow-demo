@@ -1,0 +1,7 @@
+name = "ai-workflow-demo"
+main = "src/app.ts"
+compatibility_date = "2024-12-30"
+
+# API_KEY is a secret, not a var. Set it with:
+#   npx wrangler secret put API_KEY
+# For local dev, put it in .dev.vars (gitignored).
