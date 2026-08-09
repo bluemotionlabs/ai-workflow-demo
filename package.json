@@ -9,7 +9,8 @@
     "verify": "npm run lint && npm run typecheck && npm run test",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "husky"
   },
   "dependencies": {
     "hono": "^4.6.14"
@@ -18,10 +19,17 @@
     "@cloudflare/workers-types": "^5.20260809.1",
     "@eslint/js": "^9.17.0",
     "eslint": "^9.17.0",
+    "lint-staged": "^17.3.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.2",
     "vitest": "^3.2.7",
     "wrangler": "^4.120.0"
+  },
+  "lint-staged": {
+    "*.ts": [
+    "eslint --fix",
+    "prettier --write"
+    ]
   }
 }
