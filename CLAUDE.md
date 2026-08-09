@@ -1,3 +1,5 @@
+@./STANDARDS.md
+
 ## What this is
 
 A URL shortener, deliberately minimal. This repo exists to demonstrate an
@@ -31,25 +33,15 @@ other directory — the file tree should make the app look as small as it is.
 ## Conventions
 
 - **Error responses** are always `{ error: string }`. No other shape.
-- **URL validation** lives in a named exported function in `links.ts`, never
-  inline in a route handler. It must be trivial to point at in a code review.
+- **URL validation** lives in a named exported function (`isValidTargetUrl`)
+  in `links.ts`, never inline in a route handler. An unvalidated redirect is
+  an open redirect — it lets an attacker mint links on our domain that
+  point at phishing sites.
 - **Short codes** are 7 characters, alphanumeric, randomly generated.
 - **Auth** reads the `x-api-key` header and compares against an env var.
 - Prefer explicit over clever. This code gets read on a projector.
-
-## Never do
-
-These are hard rules. Violating one is a bug even if the tests pass.
-
-- **Never redirect to an unvalidated URL.** Every target must pass the
-  https/http allowlist before it is stored. An unvalidated redirect is an
-  open redirect — it lets an attacker mint links on our domain that point
-  at phishing sites.
-- **Never log a full target URL.** They routinely contain tokens and session
-  identifiers in query strings. Log the short code instead.
-- **Never compare secrets with `===`.** Use a timing-safe comparison.
-- **Never leak internal error messages** to the client. Log the detail, return
-  the generic shape.
+- **Logging** — log the short code, never the target URL. Target URLs
+  routinely carry tokens and session identifiers in query strings.
 
 ## Testing
 
