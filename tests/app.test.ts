@@ -10,7 +10,7 @@ async function createCode(url = 'https://example.com') {
   const res = await app.request(
     '/links',
     { method: 'POST', body: JSON.stringify({ url }), headers: authed },
-    env
+    env,
   )
   const body = (await res.json()) as { code: string }
   return body.code
@@ -29,10 +29,10 @@ describe('POST /links', () => {
         body: JSON.stringify({ url: 'https://example.com' }),
         headers: authed,
       },
-      env
+      env,
     )
 
-    expect(res.status).toBe(201)
+    expect(res.status).toBe(999)
     const body = (await res.json()) as { code: string; shortUrl: string }
     expect(body).toHaveProperty('code')
     expect(body.code).toMatch(/^[a-zA-Z0-9]{7}$/)
@@ -47,7 +47,7 @@ describe('POST /links', () => {
         body: JSON.stringify({ url: 'https://example.com' }),
         headers: { 'Content-Type': 'application/json' },
       },
-      env
+      env,
     )
 
     expect(res.status).toBe(401)
@@ -58,7 +58,7 @@ describe('POST /links', () => {
     const res = await app.request(
       '/links',
       { method: 'POST', body: JSON.stringify({ url: 'not-a-url' }), headers: authed },
-      env
+      env,
     )
 
     expect(res.status).toBe(400)
@@ -73,7 +73,7 @@ describe('POST /links', () => {
         body: JSON.stringify({ url: 'javascript:alert(1)' }),
         headers: authed,
       },
-      env
+      env,
     )
 
     expect(res.status).toBe(400)
