@@ -10,6 +10,16 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    # KNOWN LIMITATION: this workflow trusts whatever ai-review.yml itself
+    # says on the PR branch — for same-repo pull_request PRs, GitHub runs
+    # the workflow file as committed on the PR, not main's version. The
+    # "Restore trusted config from main" step below protects CLAUDE.md,
+    # STANDARDS.md, and .claude/ from being rewritten by a PR, but does
+    # NOT stop a PR from editing this file directly (deleting the restore
+    # step, or adding a step that exfiltrates ANTHROPIC_API_KEY). Safe
+    # here because this repo has one contributor. A multi-contributor
+    # repo needs a GitHub Environment with required reviewers gating the
+    # secret, or a workflow_run split.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,13 +66,8 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           if [ "${{ steps.run_review.outcome }}" != "success" ]; then
-            # Raw output may contain unmasked error detail — GitHub's
-            # secret redaction covers workflow logs, not comment bodies
-            # posted via the API. Keep detail in the log, post a pointer.
             echo "**AI review failed to run.** See the [workflow run]($RUN_URL) for details." > /tmp/pr-comment.txt
           elif [ -s /tmp/review-output.txt ]; then
-            # gh pr comment rejects bodies over 65536 chars — truncate
-            # with a pointer rather than losing the comment entirely.
             head -c 60000 /tmp/review-output.txt > /tmp/pr-comment.txt
             if [ "$(wc -c < /tmp/review-output.txt)" -gt 60000 ]; then
               echo -e "\n\n_[truncated — full output in the [workflow run]($RUN_URL)]_" >> /tmp/pr-comment.txt

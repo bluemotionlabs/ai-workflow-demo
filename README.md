@@ -7,10 +7,14 @@ automatically on every PR — using nothing but files committed in this repo.
 No proprietary tooling; every piece here is a plain text file, a shell hook,
 or a GitHub Actions workflow, so the pattern ports to any language or stack.
 
-The app itself is intentionally minimal (~115 lines, three files) — it's not
-the point. What matters is `src/auth.ts` (a deliberately naive API-key
-check) and the URL-validation logic in `src/links.ts`/`src/app.ts`, both of
-which exist to give the review gates something real to catch.
+The app itself is intentionally minimal (176 lines across three files) —
+it's not the point. `src/auth.ts` and the URL-validation logic in
+`src/links.ts` are both correctly implemented on `main` (constant-time
+API-key comparison, an https/http allowlist for redirect targets) — the
+security substance the four gates exist to protect. Deliberately broken
+variants of both were tested on separate demo branches during development
+— never merged — specifically to confirm the gates catch real regressions
+rather than passing silently.
 
 ## How this was built
 
@@ -32,9 +36,12 @@ which exist to give the review gates something real to catch.
 
 3. **Pre-commit checks via [Husky](.husky/pre-commit)** — hooks on
    `git commit` that block the commit if it doesn't pass type checking
-   (`tsc --noEmit`). Lint and formatting issues (ESLint, Prettier via
-   `lint-staged`) don't block at all — they're auto-fixed and silently
-   re-staged instead.
+   (`tsc --noEmit`).
+
+   Autofixable lint and formatting issues (ESLint `--fix`, Prettier via
+   `lint-staged`) are corrected and silently re-staged. Lint errors ESLint
+   can't autofix — most `@typescript-eslint` rules, like
+   `no-floating-promises` — still block the commit, same as a type error.
 
 4. **[`CODEOWNERS`](.github/CODEOWNERS)** and a repo secret for
    `ANTHROPIC_API_KEY`.
@@ -56,7 +63,7 @@ which exist to give the review gates something real to catch.
 | Gate | What it enforces | Where |
 |---|---|---|
 | 1 — Agent context | Conventions and security rules present in every AI session, before code is written | [`CLAUDE.md`](CLAUDE.md), [`STANDARDS.md`](STANDARDS.md) |
-| 2 — Pre-commit | Type errors block; lint/format auto-fix | [`.husky/pre-commit`](.husky/pre-commit) |
+| 2 — Pre-commit | Type errors block; autofixable lint/format issues auto-fix; unfixable lint errors block | [`.husky/pre-commit`](.husky/pre-commit) |
 | 3 — Pre-PR review | Same review prompt, run locally before pushing | [`.claude/commands/review.md`](.claude/commands/review.md) |
 | 4a — CI (deterministic) | Tests, types, lint — required to merge | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 | 4b — CI (AI-assisted) | Same review prompt, run automatically on every PR, advisory only | [`.github/workflows/ai-review.yml`](.github/workflows/ai-review.yml) |
