@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # full history — review.md runs `git diff origin/main...HEAD` itself
 
       - uses: actions/setup-node@v4
         with:
@@ -22,23 +22,40 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Load review prompt from main
+        run: |
+          # Pull the prompt from main, not the PR head — a PR can't rewrite
+          # its own review instructions.
+          git show origin/main:.claude/commands/review.md > /tmp/review-prompt.md
+
       - name: Run review
+        id: run_review
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          claude -p "$(cat .claude/commands/review.md)
+          set -o pipefail
+          claude -p "$(cat /tmp/review-prompt.md)
 
           REPO: ${{ github.repository }}
-          PR NUMBER: ${{ github.event.pull_request.number }}" > /tmp/review-output.txt 2>&1 || true
-          cat /tmp/review-output.txt
+          PR NUMBER: ${{ github.event.pull_request.number }}" 2>&1 | tee /tmp/review-output.txt
 
       - name: Post review as PR comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -s /tmp/review-output.txt ]; then
-            gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/review-output.txt
+          if [ "${{ steps.run_review.outcome }}" != "success" ]; then
+            {
+              echo "**AI review failed to run.** Raw output below for debugging — do not treat this as a completed review."
+              echo
+              echo '```'
+              cat /tmp/review-output.txt 2>/dev/null || echo "(no output captured)"
+              echo '```'
+            } > /tmp/pr-comment.txt
+          elif [ -s /tmp/review-output.txt ]; then
+            cp /tmp/review-output.txt /tmp/pr-comment.txt
           else
-            echo "No review output to post"
+            echo "AI review produced no output." > /tmp/pr-comment.txt
           fi
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr-comment.txt
