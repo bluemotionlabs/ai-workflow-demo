@@ -3,6 +3,7 @@ name: AI Review
 on:
   pull_request:
     types: [opened, synchronize]
+    branches: [main]
 
 jobs:
   review:
@@ -10,10 +11,56 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    # KNOWN LIMITATIONS (accepted for this single-contributor demo repo):
+    #
+    # 1. Workflow self-trust: this workflow trusts whatever ai-review.yml
+    #    itself says on the PR branch — for same-repo pull_request PRs,
+    #    GitHub runs the workflow file as committed on the PR, not main's
+    #    version. The "Restore trusted config from main" step below
+    #    protects CLAUDE.md, STANDARDS.md, and .claude/ from being
+    #    rewritten by a PR, but does NOT stop a PR from editing this file
+    #    directly (deleting the restore step, or adding a step that
+    #    exfiltrates ANTHROPIC_API_KEY). A multi-contributor repo needs a
+    #    GitHub Environment with required reviewers gating the secret, or
+    #    a workflow_run split.
+    #
+    # 2. Diff-content injection: pinning config files stops a PR from
+    #    rewriting the reviewer's *instructions*, but the diff itself —
+    #    the largest untrusted input — still flows straight into the
+    #    model's context unfiltered. Text in a comment, fixture, or this
+    #    README could attempt to steer the review. This is inherent to
+    #    LLM-based review, not something config-pinning or job isolation
+    #    fixes. Tolerable because the reviewer is advisory-only and has
+    #    no write access beyond posting a PR comment.
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # full history — review.md runs `git diff origin/main...HEAD` itself
+
+      - name: Restore trusted config from main
+        run: |
+          # claude reads CLAUDE.md, STANDARDS.md, and .claude/ config
+          # (including hooks in .claude/settings.json, which execute
+          # arbitrary shell) from the working tree — which is the PR's
+          # tree. A same-repo PR could edit any of these, including
+          # nested CLAUDE.md files picked up when claude reads files in
+          # that directory, to strip review rules or grant itself code
+          # execution inside a job holding ANTHROPIC_API_KEY. Delete
+          # every CLAUDE.md (root and nested), CLAUDE.local.md, .mcp.json,
+          # and .claude/, then restore only the root files from main.
+          # Doesn't touch the diff itself — that's computed from git
+          # history (origin/main...HEAD), not the working tree.
+          find . -name 'CLAUDE.md' -not -path './.git/*' -not -path './node_modules/*' -delete
+          rm -f CLAUDE.local.md .mcp.json
+          rm -rf .claude
+          git checkout origin/main -- CLAUDE.md STANDARDS.md .claude
+
+      - name: Verify review prompt is present
+        run: |
+          [ -s .claude/commands/review.md ] || {
+            echo "review.md missing or empty after restore — failing rather than running an empty review" >&2
+            exit 1
+          }
 
       - uses: actions/setup-node@v4
         with:
@@ -23,22 +70,41 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run review
+        id: run_review
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          set -o pipefail
           claude -p "$(cat .claude/commands/review.md)
 
           REPO: ${{ github.repository }}
-          PR NUMBER: ${{ github.event.pull_request.number }}" > /tmp/review-output.txt 2>&1 || true
-          cat /tmp/review-output.txt
+          PR NUMBER: ${{ github.event.pull_request.number }}" 2>&1 | tee /tmp/review-output.txt
 
       - name: Post review as PR comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -s /tmp/review-output.txt ]; then
-            gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/review-output.txt
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if [ "${{ steps.run_review.outcome }}" != "success" ]; then
+            echo "**AI review failed to run.** See the [workflow run]($RUN_URL) for details." > /tmp/pr-comment.txt
+          elif [ -s /tmp/review-output.txt ]; then
+            # head -c cuts at a byte boundary and can split a multibyte
+            # UTF-8 character (this output is full of em-dashes); iconv
+            # -c drops any invalid trailing bytes left by the cut.
+            head -c 60000 /tmp/review-output.txt | iconv -f utf-8 -t utf-8 -c > /tmp/pr-comment.txt
+            if [ "$(wc -c < /tmp/review-output.txt)" -gt 60000 ]; then
+              echo -e "\n\n_[truncated — full output in the [workflow run]($RUN_URL)]_" >> /tmp/pr-comment.txt
+            fi
           else
-            echo "No review output to post"
+            echo "AI review produced no output." > /tmp/pr-comment.txt
           fi
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr-comment.txt
+
+      - name: Fail job if review did not run
+        if: steps.run_review.outcome != 'success'
+        run: |
+          echo "The review step failed to execute — see 'Run review' above. This is separate from review findings, which never fail this job by design."
+          exit 1
