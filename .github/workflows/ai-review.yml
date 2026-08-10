@@ -34,3 +34,14 @@ jobs:
           prompt: ${{ steps.review_prompt.outputs.prompt }}
           show_full_output: true
           display_report: true
+
+      - name: Post report as PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s "$GITHUB_STEP_SUMMARY" ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No step summary content to post"
+          fi
