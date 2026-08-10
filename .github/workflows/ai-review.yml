@@ -15,18 +15,26 @@ jobs:
         with:
           fetch-depth: 0   # full history — review.md runs `git diff origin/main...HEAD` itself
 
+      - name: Restore trusted config from main
+        run: |
+          # claude reads CLAUDE.md, STANDARDS.md, and .claude/ config
+          # (including hooks in .claude/settings.json, which execute
+          # arbitrary shell) from the working tree — which is the PR's
+          # tree. A same-repo PR could edit any of these to strip review
+          # rules or grant itself code execution inside a job holding
+          # ANTHROPIC_API_KEY. Wipe .claude/ and overwrite the
+          # trust-bearing files with main's versions before claude runs.
+          # Doesn't touch the diff itself — that's computed from git
+          # history (origin/main...HEAD), not the working tree.
+          rm -rf .claude
+          git checkout origin/main -- CLAUDE.md STANDARDS.md .claude
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
-
-      - name: Load review prompt from main
-        run: |
-          # Pull the prompt from main, not the PR head — a PR can't rewrite
-          # its own review instructions.
-          git show origin/main:.claude/commands/review.md > /tmp/review-prompt.md
 
       - name: Run review
         id: run_review
@@ -35,7 +43,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -o pipefail
-          claude -p "$(cat /tmp/review-prompt.md)
+          claude -p "$(cat .claude/commands/review.md)
 
           REPO: ${{ github.repository }}
           PR NUMBER: ${{ github.event.pull_request.number }}" 2>&1 | tee /tmp/review-output.txt
@@ -45,17 +53,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
           if [ "${{ steps.run_review.outcome }}" != "success" ]; then
-            {
-              echo "**AI review failed to run.** Raw output below for debugging — do not treat this as a completed review."
-              echo
-              echo '```'
-              cat /tmp/review-output.txt 2>/dev/null || echo "(no output captured)"
-              echo '```'
-            } > /tmp/pr-comment.txt
+            # Raw output may contain unmasked error detail — GitHub's
+            # secret redaction covers workflow logs, not comment bodies
+            # posted via the API. Keep detail in the log, post a pointer.
+            echo "**AI review failed to run.** See the [workflow run]($RUN_URL) for details." > /tmp/pr-comment.txt
           elif [ -s /tmp/review-output.txt ]; then
-            cp /tmp/review-output.txt /tmp/pr-comment.txt
+            # gh pr comment rejects bodies over 65536 chars — truncate
+            # with a pointer rather than losing the comment entirely.
+            head -c 60000 /tmp/review-output.txt > /tmp/pr-comment.txt
+            if [ "$(wc -c < /tmp/review-output.txt)" -gt 60000 ]; then
+              echo -e "\n\n_[truncated — full output in the [workflow run]($RUN_URL)]_" >> /tmp/pr-comment.txt
+            fi
           else
             echo "AI review produced no output." > /tmp/pr-comment.txt
           fi
           gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr-comment.txt
+
+      - name: Fail job if review did not run
+        if: steps.run_review.outcome != 'success'
+        run: |
+          echo "The review step failed to execute — see 'Run review' above. This is separate from review findings, which never fail this job by design."
+          exit 1
