@@ -10,38 +10,35 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history — review.md runs `git diff origin/main...HEAD` itself
+          fetch-depth: 0
 
-      - name: Load review prompt
-        id: review_prompt
-        run: |
-          {
-            echo 'prompt<<EOF'
-            cat .claude/commands/review.md
-            echo ''
-            echo "REPO: ${{ github.repository }}"
-            echo "PR NUMBER: ${{ github.event.pull_request.number }}"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - uses: anthropics/claude-code-action@v1
+      - uses: actions/setup-node@v4
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: ${{ steps.review_prompt.outputs.prompt }}
-          show_full_output: true
-          display_report: true
+          node-version: 24
 
-      - name: Post report as PR comment
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "$(cat .claude/commands/review.md)
+
+          REPO: ${{ github.repository }}
+          PR NUMBER: ${{ github.event.pull_request.number }}" > /tmp/review-output.txt 2>&1 || true
+          cat /tmp/review-output.txt
+
+      - name: Post review as PR comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -s "$GITHUB_STEP_SUMMARY" ]; then
-            gh pr comment ${{ github.event.pull_request.number }} --body-file "$GITHUB_STEP_SUMMARY"
+          if [ -s /tmp/review-output.txt ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/review-output.txt
           else
-            echo "No step summary content to post"
+            echo "No review output to post"
           fi
