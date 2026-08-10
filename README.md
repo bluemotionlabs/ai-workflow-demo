@@ -32,7 +32,7 @@ rather than passing silently.
    Code's separate "Skills" feature), invocable as `/review`. Its content
    is used two ways: run manually by a developer anytime, before opening a
    PR (Gate 3), or reused as the prompt inside a GitHub Actions workflow
-   that runs automatically on every PR (Gate 4b).
+   that runs automatically on every PR into `main` (Gate 4b).
 
 3. **Pre-commit checks via [Husky](.husky/pre-commit)** — hooks on
    `git commit` that block the commit if it doesn't pass type checking
@@ -48,9 +48,9 @@ rather than passing silently.
 
 5. **Deterministic CI** — a GitHub Actions workflow
    ([`ci.yml`](.github/workflows/ci.yml)) runs `npm run verify` (lint +
-   typecheck + test) on every PR. Branch protection on `main` requires this
-   check to pass before merging — a failing check doesn't just show a red
-   X, it disables the merge button entirely.
+   typecheck + test) on every PR into `main`. Branch protection requires
+   this check to pass before merging — a failing check doesn't just show a
+   red X, it disables the merge button entirely.
 
 6. **AI-assisted PR review** — a second workflow
    ([`ai-review.yml`](.github/workflows/ai-review.yml)) uses the Anthropic
@@ -73,11 +73,14 @@ Everything else — a `CLAUDE.md` file, a pre-commit hook, a slash command, a
 workflow that calls out to an LLM — ports to any language. Swap the one
 command and the pattern holds for a Python or Go repo just as well.
 
-**AI review is advisory by design.** It never fails the required check and
-never blocks the merge button — only `npm run verify` and human approval do
-that. The point is a second set of eyes with full context of the diff and
-the codebase's written conventions, not a gate that can be wrong and stop
-work.
+**AI review is advisory by design.** It never fails on findings and never
+blocks the merge button — only `npm run verify` and human approval do
+that. It does go red on an infrastructure failure (the review step itself
+crashing or producing nothing), which is a deliberate exception: a
+confident-sounding comment with no actual review behind it is worse than a
+visible failure. The point of the gate is a second set of eyes with full
+context of the diff and the codebase's written conventions, not a check
+that can be silently wrong.
 
 ## Mitigating AI coding risk — what this repo actually found
 
@@ -88,23 +91,28 @@ This pipeline caught real things, not staged ones:
   checker was flagged, correctly and specifically, by both `/review`
   (Gate 3, run locally) and the CI-based review (Gate 4b) — merge blocked
   by branch protection pending approval either way.
-- **A real gap in the AI-review workflow itself.** While hardening
-  `ai-review.yml` against a PR rewriting its own review instructions,
-  `/review` — pointed at its own infrastructure — found the fix was
-  incomplete (the pin covered `review.md` but not
-  `CLAUDE.md`/`STANDARDS.md`, both loaded via `@import`) and flagged a
-  second issue: a PR could add `.claude/settings.json` and get arbitrary
-  code execution inside a job holding the API key. Both were real, both got
-  fixed.
-- **A known limitation, documented rather than hidden.** For
-  `pull_request`-triggered workflows, GitHub runs the workflow YAML exactly
-  as committed on the PR branch — not `main`'s version. A same-repo
-  contributor (not a fork) can edit `ai-review.yml` directly and bypass
-  every file-level protection built into it. This repo has one
-  contributor, so the risk is accepted and noted in a comment in
-  [`ai-review.yml`](.github/workflows/ai-review.yml). A multi-contributor
-  repo would need a GitHub Environment gated by required reviewers, or a
-  `workflow_run` split, around the job that holds the secret.
+- **Real gaps in the AI-review workflow itself, found by pointing the
+  reviewer at its own infrastructure.** Iterating on `ai-review.yml`'s
+  hardening surfaced, in order: an incomplete config pin (covered
+  `review.md` but not `CLAUDE.md`/`STANDARDS.md`, both loaded via
+  `@import`); a way for a PR to grant itself code execution via
+  `.claude/settings.json`; nested `CLAUDE.md` files surviving the pin
+  entirely; and a silent-pass path where an empty or missing prompt file
+  would exit 0 and post a confident-looking comment backed by no actual
+  review. All were real, all got fixed.
+- **Two known limitations, documented rather than hidden** (see the
+  comment block at the top of
+  [`ai-review.yml`](.github/workflows/ai-review.yml)): for
+  `pull_request`-triggered workflows, GitHub runs the workflow YAML
+  exactly as committed on the PR branch, so a same-repo contributor can
+  edit `ai-review.yml` directly and bypass every file-level protection
+  built into it — accepted here because this repo has one contributor; a
+  multi-contributor repo needs a GitHub Environment gated by required
+  reviewers, or a `workflow_run` split. Separately, pinning config files
+  stops a PR from rewriting the reviewer's *instructions*, but not the
+  diff content itself, which still flows unfiltered into the model's
+  context — inherent to LLM-based review, tolerable only because the
+  reviewer is advisory-only.
 
 The pattern worth taking away: AI review is one more layer, not a
 substitute for the others, and the tooling that reviews your code is
