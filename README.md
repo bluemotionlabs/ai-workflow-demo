@@ -77,40 +77,37 @@ an `ANTHROPIC_API_KEY` repo secret for Gate 4b.
 
 An LLM reviewer can be confidently wrong. Wiring it to the merge button means a
 bad call stops work, and teams route around checks that stop work for bad
-reasons. Gate 4b posts findings and gets out of the way. Deterministic checks
-and human approval are what actually gate the merge.
+reasons. Gate 4b posts findings and gets out of the way. The required `verify`
+check, plus whatever approval count the team sets, is what gates the merge.
 
 The workflow does fail on infrastructure errors, when the review step crashes
 or returns nothing, because a normal-looking comment backed by no actual review
 is worse than a visible failure. That failure still does not block the merge,
 since 4b is not a required check.
 
-## What the pipeline caught
+Gate 4b has two limitations that are documented rather than fixed. They are
+described in a comment at the top of
+[`ai-review.yml`](.github/workflows/ai-review.yml), and both are worth reading
+before copying this workflow into a repo with more than one contributor.
 
-An open redirect. A branch commented out the URL validation in `POST /links`
-and cast an unvalidated `unknown` to `string` to get past the type checker.
-Both Gate 3 and Gate 4b flagged it specifically, and branch protection held the
-merge.
+## What a review can surface
 
-Gaps in the AI review workflow itself, found by pointing `/review` at its own
-infrastructure. The workflow reads its prompt and standards from the PR's
-working tree, so a PR could rewrite the rules it would be judged by. Successive
-reviews turned up an incomplete fix that pinned `review.md` but not `CLAUDE.md`
-and `STANDARDS.md`, a path to code execution through a PR-supplied
-`.claude/settings.json`, nested `CLAUDE.md` files surviving the pin, and a case
-where a missing prompt file would exit clean and post an empty review. All were
-fixed by restoring the config files from `main` before the reviewer runs.
+`/review` reports findings grouped as Blocking, Should Fix, and Consider. The
+kinds of things it picks up:
 
-Two limitations that are documented rather than fixed, in a comment at the top
-of `ai-review.yml`. GitHub runs the workflow YAML as committed on the PR
-branch, not the version on `main`, so a same-repo contributor can edit
-`ai-review.yml` itself and bypass every file-level protection in it. This repo
-has one contributor. A team repo needs a GitHub Environment gated by required
-reviewers, or a `workflow_run` split, around the job holding the API key.
-Separately, pinning config files stops a PR from rewriting the reviewer's
-instructions but not the diff text itself, which still reaches the model
-unfiltered. That one is inherent to LLM review and is tolerable only because
-Gate 4b cannot block anything.
+- Security regressions in code that compiles and lints clean. Validation
+  commented out of a route, an `unknown` cast to `string` to satisfy the type
+  checker, a secret compared with `===`.
+- Conventions no linter encodes, because they live in `CLAUDE.md` and
+  `STANDARDS.md` as prose. The `{ error: string }` response shape, the flat
+  `src/` layout, logging the short code instead of the target URL.
+- Missing tests on a new endpoint, and existing tests a change quietly broke.
+- Edge cases in new logic: empty input, malformed bodies, boundary values.
+- Problems in the pipeline itself, since workflow files are code too. Pointing
+  `/review` at `ai-review.yml` found a config pin that missed two files and a
+  path where a missing prompt would exit clean and post an empty review.
+- Documentation that has drifted from configuration, such as a README claiming
+  a check blocks the merge when branch protection does not require it.
 
 ## Porting this
 
