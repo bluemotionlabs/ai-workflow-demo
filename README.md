@@ -1,120 +1,127 @@
-# ai-workflow-demo
+# Case Study: TypeScript AI CI Pipeline
 
-A small URL shortener, built to demonstrate a four-gate AI-assisted coding
-workflow: the same standards enforced at four different points — when an
-agent writes code, when a developer commits, before a PR is opened, and
-automatically on every PR — using nothing but files committed in this repo.
-No proprietary tooling; every piece here is a plain text file, a shell hook,
-or a GitHub Actions workflow, so the pattern ports to any language or stack.
+Operationalizing AI code review.
 
-The app itself is intentionally minimal (176 lines across three files) —
-it's not the point. `src/auth.ts` and the URL-validation logic in
-`src/links.ts` are both correctly implemented on `main` (constant-time
-API-key comparison, an https/http allowlist for redirect targets) — the
-security substance the four gates exist to protect. Deliberately broken
-variants of both were tested on separate demo branches during development
-— never merged — specifically to confirm the gates catch real regressions
-rather than passing silently.
+This repo is a small URL shortener wrapped in a four-gate review pipeline. The
+same coding standards are enforced when an agent writes code, when a developer
+commits, before a PR is opened, and on the PR itself, where two checks run side
+by side. Every gate is a plain file committed to the repo. There is no
+proprietary tooling and nothing to install beyond npm packages.
 
-## How this was built
+The app is 176 lines across three files in `src/`. It is scaffolding for the
+pipeline, not the subject. `src/auth.ts` uses a constant-time API key
+comparison and `src/links.ts` validates redirect targets against an http/https
+allowlist. Those two pieces are the security substance the gates protect.
+Broken versions of both were pushed on throwaway branches during development,
+never merged, to confirm the gates actually catch regressions.
 
-1. **`STANDARDS.md`** — company-wide coding standards and security rules,
-   portable across every repo. Then **`CLAUDE.md`** — project-specific
-   direction (architecture, conventions, and where each `STANDARDS.md` rule
-   is enforced in this codebase). `CLAUDE.md` was written before any code
-   was scaffolded — it's intent, not documentation of what already exists.
+## The four gates
 
-   `CLAUDE.md` loads into context automatically at the start of every
-   Claude Code session in this repo. Its first line, `@./STANDARDS.md`,
-   pulls `STANDARDS.md` in too — both are always present, with no reminding.
+| Gate | Who runs it | What it does | Outcome |
+|---|---|---|---|
+| 1. Agent Context | Agent, automatic | Loads the standards into every AI session before code is written | Sets standard |
+| 2. Pre-Commit | Developer, automatic | lint-staged (ESLint + Prettier), then typecheck | Blocks commit |
+| 3. Pre-PR Review | Developer, manual | `/review` run locally before opening a PR | Advisory only |
+| 4a. CI Deterministic | CI bot | `npm run verify` (lint + typecheck + test) on every PR | Blocks merge |
+| 4b. CI AI Review | CI bot | Same `/review` prompt, posted as a PR comment | Advisory only |
 
-2. **`.claude/commands/review.md`** — a slash command (distinct from Claude
-   Code's separate "Skills" feature), invocable as `/review`. Its content
-   is used two ways: run manually by a developer anytime, before opening a
-   PR (Gate 3), or reused as the prompt inside a GitHub Actions workflow
-   that runs automatically on every PR into `main` (Gate 4b).
+Gates 1 through 3 run on the developer's machine, at the commit level. Gates 4a
+and 4b run on GitHub, at the PR level, and both fire from the same pull request
+trigger. Merging requires 4a passing plus reviewer approval.
 
-3. **Pre-commit checks via [Husky](.husky/pre-commit)** — hooks on
-   `git commit` that block the commit if it doesn't pass type checking
-   (`tsc --noEmit`).
+Gate 3 is the only manual step. Nothing enforces it, which is why 4b exists:
+the same review runs automatically whether or not anyone remembered to run it
+locally.
 
-   Autofixable lint and formatting issues (ESLint `--fix`, Prettier via
-   `lint-staged`) are corrected and silently re-staged. Lint errors ESLint
-   can't autofix — most `@typescript-eslint` rules, like
-   `no-floating-promises` — still block the commit, same as a type error.
+## The files
 
-4. **[`CODEOWNERS`](.github/CODEOWNERS)** and a repo secret for
-   `ANTHROPIC_API_KEY`.
+**[`STANDARDS.md`](STANDARDS.md)** holds security and quality rules that apply
+to any repo, in any language. Copy it into a new project unchanged.
 
-5. **Deterministic CI** — a GitHub Actions workflow
-   ([`ci.yml`](.github/workflows/ci.yml)) runs `npm run verify` (lint +
-   typecheck + test) on every PR into `main`. Branch protection requires
-   this check to pass before merging — a failing check doesn't just show a
-   red X, it disables the merge button entirely.
+**[`CLAUDE.md`](CLAUDE.md)** holds project-specific direction: architecture,
+file layout, conventions, and where each `STANDARDS.md` rule applies in this
+codebase. It was written before any code was scaffolded, so it describes intent
+rather than documenting what already exists. Claude Code loads it at the start
+of every session in this repo, and its first line, `@./STANDARDS.md`, pulls the
+standards in with it. Together these two files are Gate 1.
 
-6. **AI-assisted PR review** — a second workflow
-   ([`ai-review.yml`](.github/workflows/ai-review.yml)) uses the Anthropic
-   API key to run the same `/review` prompt against the PR diff, and posts
-   the result as a PR comment: a summary and analysis for a human reviewer
-   to optionally consider, not a gate that blocks anything on its own.
+**[`.claude/commands/review.md`](.claude/commands/review.md)** is a slash
+command, invocable as `/review`. It tells the reviewer to diff against `main`
+and check the result against `STANDARDS.md` and `CLAUDE.md` rule by rule. One
+file, used in two places: a developer runs it locally (Gate 3), and CI feeds
+the same text to `claude -p` as a prompt (Gate 4b). Slash commands are a
+different mechanism from Claude Code Skills. This uses a command because CI
+needs the raw prompt text.
 
-## The four gates, at a glance
+**[`.husky/pre-commit`](.husky/pre-commit)** is Gate 2, two lines. `npx
+lint-staged` runs ESLint `--fix` and Prettier against staged files, fixing what
+it can and re-staging the result. `npm run typecheck` runs `tsc --noEmit`. Lint
+errors that cannot be autofixed, such as `no-floating-promises`, stop the
+commit before typecheck runs. A type error stops it too. No AI is involved
+here; all three tools are deterministic.
 
-| Gate | What it enforces | Where |
-|---|---|---|
-| 1 — Agent context | Conventions and security rules present in every AI session, before code is written | [`CLAUDE.md`](CLAUDE.md), [`STANDARDS.md`](STANDARDS.md) |
-| 2 — Pre-commit | Type errors block; autofixable lint/format issues auto-fix; unfixable lint errors block | [`.husky/pre-commit`](.husky/pre-commit) |
-| 3 — Pre-PR review | Same review prompt, run locally before pushing | [`.claude/commands/review.md`](.claude/commands/review.md) |
-| 4a — CI (deterministic) | Tests, types, lint — required to merge | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
-| 4b — CI (AI-assisted) | Same review prompt, run automatically on every PR, advisory only | [`.github/workflows/ai-review.yml`](.github/workflows/ai-review.yml) |
+**[`.github/workflows/ci.yml`](.github/workflows/ci.yml)** is Gate 4a. It runs
+`npm run verify` on every PR into `main`. Branch protection lists it as a
+required check, so a failure disables the merge button rather than just showing
+a red X.
 
-`npm run verify` is the only stack-specific piece in this whole pipeline.
-Everything else — a `CLAUDE.md` file, a pre-commit hook, a slash command, a
-workflow that calls out to an LLM — ports to any language. Swap the one
-command and the pattern holds for a Python or Go repo just as well.
+**[`.github/workflows/ai-review.yml`](.github/workflows/ai-review.yml)** is
+Gate 4b. It installs Claude Code, runs `review.md` against the PR diff, and
+posts the result as a PR comment for a human to read. It is not a required
+check, so findings never block a merge.
 
-**AI review is advisory by design.** It never fails on findings and never
-blocks the merge button — only `npm run verify` and human approval do
-that. It does go red on an infrastructure failure (the review step itself
-crashing or producing nothing), which is a deliberate exception: a
-confident-sounding comment with no actual review behind it is worse than a
-visible failure. The point of the gate is a second set of eyes with full
-context of the diff and the codebase's written conventions, not a check
-that can be silently wrong.
+Supporting pieces: [`CODEOWNERS`](.github/CODEOWNERS) for review assignment and
+an `ANTHROPIC_API_KEY` repo secret for Gate 4b.
 
-## Mitigating AI coding risk — what this repo actually found
+## Why AI review is advisory
 
-This pipeline caught real things, not staged ones:
+An LLM reviewer can be confidently wrong. Wiring it to the merge button means a
+bad call stops work, and teams route around checks that stop work for bad
+reasons. Gate 4b posts findings and gets out of the way. Deterministic checks
+and human approval are what actually gate the merge.
 
-- **An actual open redirect.** A branch that commented out URL validation
-  and cast an unvalidated `unknown` to `string` to sneak past the type
-  checker was flagged, correctly and specifically, by both `/review`
-  (Gate 3, run locally) and the CI-based review (Gate 4b) — merge blocked
-  by branch protection pending approval either way.
-- **Real gaps in the AI-review workflow itself, found by pointing the
-  reviewer at its own infrastructure.** Iterating on `ai-review.yml`'s
-  hardening surfaced, in order: an incomplete config pin (covered
-  `review.md` but not `CLAUDE.md`/`STANDARDS.md`, both loaded via
-  `@import`); a way for a PR to grant itself code execution via
-  `.claude/settings.json`; nested `CLAUDE.md` files surviving the pin
-  entirely; and a silent-pass path where an empty or missing prompt file
-  would exit 0 and post a confident-looking comment backed by no actual
-  review. All were real, all got fixed.
-- **Two known limitations, documented rather than hidden** (see the
-  comment block at the top of
-  [`ai-review.yml`](.github/workflows/ai-review.yml)): for
-  `pull_request`-triggered workflows, GitHub runs the workflow YAML
-  exactly as committed on the PR branch, so a same-repo contributor can
-  edit `ai-review.yml` directly and bypass every file-level protection
-  built into it — accepted here because this repo has one contributor; a
-  multi-contributor repo needs a GitHub Environment gated by required
-  reviewers, or a `workflow_run` split. Separately, pinning config files
-  stops a PR from rewriting the reviewer's *instructions*, but not the
-  diff content itself, which still flows unfiltered into the model's
-  context — inherent to LLM-based review, tolerable only because the
-  reviewer is advisory-only.
+The workflow does fail on infrastructure errors, when the review step crashes
+or returns nothing, because a normal-looking comment backed by no actual review
+is worse than a visible failure. That failure still does not block the merge,
+since 4b is not a required check.
 
-The pattern worth taking away: AI review is one more layer, not a
-substitute for the others, and the tooling that reviews your code is
-itself code that needs the same scrutiny — including, recursively, from
-itself.
+## What the pipeline caught
+
+An open redirect. A branch commented out the URL validation in `POST /links`
+and cast an unvalidated `unknown` to `string` to get past the type checker.
+Both Gate 3 and Gate 4b flagged it specifically, and branch protection held the
+merge.
+
+Gaps in the AI review workflow itself, found by pointing `/review` at its own
+infrastructure. The workflow reads its prompt and standards from the PR's
+working tree, so a PR could rewrite the rules it would be judged by. Successive
+reviews turned up an incomplete fix that pinned `review.md` but not `CLAUDE.md`
+and `STANDARDS.md`, a path to code execution through a PR-supplied
+`.claude/settings.json`, nested `CLAUDE.md` files surviving the pin, and a case
+where a missing prompt file would exit clean and post an empty review. All were
+fixed by restoring the config files from `main` before the reviewer runs.
+
+Two limitations that are documented rather than fixed, in a comment at the top
+of `ai-review.yml`. GitHub runs the workflow YAML as committed on the PR
+branch, not the version on `main`, so a same-repo contributor can edit
+`ai-review.yml` itself and bypass every file-level protection in it. This repo
+has one contributor. A team repo needs a GitHub Environment gated by required
+reviewers, or a `workflow_run` split, around the job holding the API key.
+Separately, pinning config files stops a PR from rewriting the reviewer's
+instructions but not the diff text itself, which still reaches the model
+unfiltered. That one is inherent to LLM review and is tolerable only because
+Gate 4b cannot block anything.
+
+## Porting this
+
+`npm run verify` is the only stack-specific piece. Swap it for `pytest` plus
+`mypy`, or `go test` plus `go vet`, and the rest carries over: a standards
+file, a project file that imports it, a review prompt, a pre-commit hook, and
+two workflows.
+
+## Commands
+
+- `npm run dev` — local dev server via Wrangler
+- `npm run verify` — lint + typecheck + test, the exact command CI runs
+- `npm run test` — vitest
+- `npm run lint` / `npm run typecheck` — individual checks
